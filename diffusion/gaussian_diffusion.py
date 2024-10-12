@@ -16,6 +16,8 @@ from copy import deepcopy
 from diffusion.nn import mean_flat, sum_flat
 from data_loaders.humanml.scripts.motion_process import recover_from_ric
 from os.path import join as pjoin
+from utils.skeleton_torch import SkeletonMotionTorch
+from data_loaders.a2m.lafan1 import lafan1_parent_tree, lafan1_skeleton_offset
 
 
 def get_named_beta_schedule(schedule_name, num_diffusion_timesteps, scale_betas=1.):
@@ -206,12 +208,19 @@ class GaussianDiffusion:
         elif dataset == 'kit':
             spatial_norm_path = './dataset/kit_spatial_norm'
             data_root = './dataset/KIT-ML'
+        elif dataset == 'lafan1':
+            spatial_norm_path = './dataset/lafan1_spatial_norm'
+            data_root = './dataset/lafan1_spatial_norm'
+            self.skeleton = SkeletonMotionTorch()
+            l_position = np.stack([lafan1_skeleton_offset] * 210, axis=0) / 100 # cm to m
+            self.skeleton.from_parent_array(lafan1_parent_tree, torch.from_numpy(l_position))
         else:
             raise NotImplementedError('Dataset not recognized!!')
         self.raw_mean = torch.from_numpy(np.load(pjoin(spatial_norm_path, 'Mean_raw.npy')))
         self.raw_std = torch.from_numpy(np.load(pjoin(spatial_norm_path, 'Std_raw.npy')))
         self.mean = torch.from_numpy(np.load(pjoin(data_root, 'Mean.npy'))).float()
         self.std = torch.from_numpy(np.load(pjoin(data_root, 'Std.npy'))).float()
+        self.dataset = dataset
 
     def masked_l2(self, a, b, mask):
         # assuming a.shape == b.shape == bs, J, Jdim, seqlen
@@ -426,9 +435,15 @@ class GaussianDiffusion:
 
             x_ = x.permute(0, 3, 2, 1).contiguous()
             x_ = x_.squeeze(2)
-            x_ = x_ * self.std + self.mean
-            n_joints = 22 if x_.shape[-1] == 263 else 21
-            joint_pos = recover_from_ric(x_, n_joints)
+            x_ = x_ * self.std + self.mean if self.dataset != 'lafan1' else x_
+            n_joints = 22 if x_.shape[-1] == 263 or self.dataset == 'lafan1' else 21
+            if self.dataset == 'lafan1':
+                x_translations = x_[..., :3, -1]
+                x_rotations = x_[..., :-1].permute(0, 1, 3, 2)
+                self.skeleton.apply_pose(x_translations, x_rotations)
+                joint_pos = self.skeleton.joints_global_positions
+            else:
+                joint_pos = recover_from_ric(x_, n_joints)
             if n_joints == 21:
                 joint_pos = joint_pos * 0.001
                 hint = hint * 0.001
@@ -451,7 +466,7 @@ class GaussianDiffusion:
         """
         Spatial guidance
         """
-        n_joint = 22 if x.shape[1] == 263 else 21
+        n_joint = 22 if x.shape[1] == 263 or self.dataset == 'lafan1' else 21
         model_log_variance = _extract_into_tensor(self.posterior_log_variance_clipped, t, x.shape)
         model_variance = torch.exp(model_log_variance)
         

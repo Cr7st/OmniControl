@@ -10,6 +10,9 @@ def get_dataset_class(name):
     elif name == "kit":
         from data_loaders.humanml.data.dataset import KIT
         return KIT
+    elif name == "lafan1":
+        from .a2m.lafan1 import Lafan1
+        return Lafan1
     else:
         raise ValueError(f'Unsupported dataset name [{name}]')
 
@@ -23,17 +26,18 @@ def get_collate_fn(name, hml_mode='train'):
         return all_collate
 
 
-def get_dataset(name, num_frames, split='train', hml_mode='train', control_joint=0, density=100):
+def get_dataset(name, num_frames, split='train', hml_mode='train', control_joint=0, density=100, datapath=''):
     DATA = get_dataset_class(name)
     if name in ["humanml", "kit"]:
         dataset = DATA(split=split, num_frames=num_frames, mode=hml_mode, control_joint=control_joint, density=density)
     else:
-        dataset = DATA(split=split, num_frames=num_frames)
+        dataset = DATA(split=split, num_frames=num_frames, control_joint=control_joint, density=density) if datapath == '' \
+            else DATA(split=split, num_frames=num_frames, control_joint=control_joint, density=density, datapath=datapath)
     return dataset
 
 
-def get_dataset_loader(name, batch_size, num_frames, split='train', hml_mode='train', control_joint=0, density=100):
-    dataset = get_dataset(name, num_frames, split, hml_mode, control_joint, density)
+def get_dataset_loader(name, batch_size, num_frames, split='train', hml_mode='train', control_joint=0, density=100, datapath=''):
+    dataset = get_dataset(name, num_frames, split, hml_mode, control_joint, density, datapath)
     collate = get_collate_fn(name, hml_mode)
 
     loader = DataLoader(

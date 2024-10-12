@@ -40,6 +40,10 @@ def get_model_args(args, data):
         data_rep = 'hml_vec'
         njoints = 251
         nfeats = 1
+    elif args.dataset == 'lafan1':
+        data_rep = 'rot6d'
+        njoints = 23 # 22 + 1, one for root translation
+        nfeats = 6
 
     return {'modeltype': '', 'njoints': njoints, 'nfeats': nfeats, 'num_actions': num_actions,
             'translation': True, 'pose_rep': 'rot6d', 'glob': True, 'glob_rot': True,

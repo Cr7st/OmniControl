@@ -6,7 +6,7 @@ from os.path import join as pjoin
 import random
 import codecs as cs
 from tqdm import tqdm
-import spacy
+# import spacy
 
 from torch.utils.data._utils.collate import default_collate
 from data_loaders.humanml.utils.word_vectorizer import WordVectorizer

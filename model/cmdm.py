@@ -2,7 +2,7 @@
 import numpy as np
 import torch
 import torch.nn as nn
-import clip
+# import clip
 from model.rotation2xyz import Rotation2xyz
 from .transformer import *
 
@@ -88,7 +88,7 @@ class CMDM(torch.nn.Module):
         # ------
         # --- CMDM ---
         # input 263 or 6 * 3 or 3
-        n_joints = 22 if njoints == 263 else 21
+        n_joints = 22 if njoints == 263 or self.dataset == 'lafan1' else 21
         self.input_hint_block = HintBlock(self.data_rep, n_joints * 3, self.latent_dim)
 
         self.c_input_process = InputProcess(self.data_rep, self.input_feats+self.gru_emb_dim, self.latent_dim)
@@ -221,7 +221,7 @@ class CMDM(torch.nn.Module):
         if 'hint' in y.keys():
             control = self.cmdm_forward(x, timesteps, y)
         else:
-            n_joints = 22 if self.njoints == 263 else 21
+            n_joints = 22 if self.njoints == 263 or self.dataset == 'lafan1' else 21
             y_ = {'hint': torch.zeros((x.shape[0], x.shape[-1], n_joints * 3), device=x.device)}
             y_.update(y)
             control = self.cmdm_forward(x, timesteps, y_)

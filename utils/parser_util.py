@@ -98,7 +98,7 @@ def add_model_options(parser):
 
 def add_data_options(parser):
     group = parser.add_argument_group('dataset')
-    group.add_argument("--dataset", default='humanml', choices=['humanml', 'kit', 'humanact12', 'uestc'], type=str,
+    group.add_argument("--dataset", default='humanml', choices=['humanml', 'kit', 'humanact12', 'uestc', 'lafan1'], type=str,
                        help="Dataset name (choose from list).")
     group.add_argument("--data_dir", default="", type=str,
                        help="If empty, will use defaults according to the specified dataset.")
@@ -124,7 +124,7 @@ def add_training_options(parser):
                             "T2m precision calculation is based on fixed batch size 32.")
     group.add_argument("--eval_split", default='test', choices=['val', 'test'], type=str,
                        help="Which split to evaluate on during training.")
-    group.add_argument("--eval_rep_times", default=3, type=int,
+    group.add_argument("--eval_rep_time s", default=3, type=int,
                        help="Number of repetitions for evaluation loop during training.")
     group.add_argument("--eval_num_samples", default=1_000, type=int,
                        help="If -1, will use all samples in the specified split.")

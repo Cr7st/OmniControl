@@ -1,9 +1,11 @@
 # This code is based on https://github.com/Mathux/ACTOR.git
 import torch
 import utils.rotation_conversions as geometry
+from utils.skeleton_torch import SkeletonMotionTorch
 
 
 from model.smpl import SMPL, JOINTSTYPE_ROOT
+from data_loaders.a2m.lafan1 import lafan1_parent_tree, lafan1_skeleton_offset
 # from .get_model import JOINTSTYPES
 JOINTSTYPES = ["a2m", "a2mpl", "smpl", "vibe", "vertices"]
 
@@ -12,6 +14,12 @@ class Rotation2xyz:
     def __init__(self, device, dataset='amass'):
         self.device = device
         self.dataset = dataset
+        if self.dataset == 'lafan1':
+            import numpy as np
+            self.l_position = np.stack([lafan1_skeleton_offset] * 210, axis=0) / 100 # cm to m
+            self.skeleton = SkeletonMotionTorch()
+            self.skeleton.from_parent_array(lafan1_parent_tree, torch.tensor(self.l_position, device=device))
+
         self.smpl_model = SMPL().eval().to(device)
 
     def __call__(self, x, mask, pose_rep, translation, glob,
@@ -37,6 +45,16 @@ class Rotation2xyz:
 
         x_rotations = x_rotations.permute(0, 3, 1, 2)
         nsamples, time, njoints, feats = x_rotations.shape
+
+        if self.dataset == 'lafan1':
+            self.skeleton.apply_pose(x_translations.permute(0, 2, 1), x_rotations)
+            x_xyz = self.skeleton.joints_global_positions
+            x_xyz[~mask] = 0
+            x_xyz = x_xyz.permute(0, 2, 3, 1).contiguous()
+            if get_rotations_back:
+                return x_xyz, x_rotations, None
+            else:
+                return x_xyz
 
         # Compute rotations (convert only masked sequences output)
         if pose_rep == "rotvec":
