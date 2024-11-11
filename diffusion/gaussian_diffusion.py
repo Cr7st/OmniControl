@@ -456,7 +456,7 @@ class GaussianDiffusion:
         return loss, grad
 
     def calc_grad_scale(self, mask_hint):
-        assert mask_hint.shape[1] == 196
+        # assert mask_hint.shape[1] == 196
         num_keyframes = mask_hint.sum(dim=1).squeeze(-1)
         max_keyframes = num_keyframes.max(dim=1)[0]
         scale = 20 / max_keyframes

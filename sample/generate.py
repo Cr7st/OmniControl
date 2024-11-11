@@ -15,10 +15,15 @@ from data_loaders.get_data import get_dataset_loader
 from data_loaders.humanml.scripts.motion_process import recover_from_ric
 import data_loaders.humanml.utils.paramUtil as paramUtil
 from data_loaders.humanml.utils.plot_script import plot_3d_motion
+from data_loaders.a2m.lafan1 import lafan1_parent_tree, lafan1_skeleton_offset
 import shutil
 from data_loaders.tensors import collate
 from utils.text_control_example import collate_all
 from os.path import join as pjoin
+from utils.bvh import Bvh
+from scipy.spatial.transform import Rotation as sRot
+import utils.rotation_conversions as geometry
+from utils import heuristic
 
 
 def main():
@@ -27,11 +32,21 @@ def main():
     out_path = args.output_dir
     name = os.path.basename(os.path.dirname(args.model_path))
     niter = os.path.basename(args.model_path).replace('model', '').replace('.pt', '')
-    max_frames = 196 if args.dataset in ['kit', 'humanml'] else 60
-    fps = 12.5 if args.dataset == 'kit' else 20
-    n_frames = min(max_frames, int(args.motion_length*fps))
-    n_frames = 196
-    is_using_data = not any([args.text_prompt])
+    if args.dataset in ['kit', 'humanml']:
+        max_frames = 196
+    elif args.dataset == 'lafan1':
+        max_frames = 219
+    else:
+        max_frames = 60
+
+    if args.dataset == 'kit':
+        fps = 12.5
+    elif args.dataset == 'lafan1':
+        fps = 30
+    else:
+        fps = 20
+    n_frames = max_frames
+    is_using_data = not any([args.text_prompt, args.action_name])
     dist_util.setup_dist(args.device)
     if out_path == '':
         out_path = os.path.join(os.path.dirname(args.model_path),
@@ -57,6 +72,10 @@ def main():
             texts = [args.text_prompt]
             args.num_samples = 1
             hint = None
+    elif args.action_name != '':
+        action_text = [args.action_name]
+        args.num_samples = 1
+        hints = None
 
     assert args.num_samples <= args.batch_size, \
         f'Please either increase batch_size({args.batch_size}) or reduce num_samples({args.num_samples})'
@@ -67,7 +86,13 @@ def main():
     args.batch_size = args.num_samples  # Sampling a single batch from the testset, with exactly args.num_samples
 
     print('Loading dataset...')
-    data = load_dataset(args, max_frames, n_frames)
+    data = get_dataset_loader(name=args.dataset,
+                              datapath=args.inpaint_motions,
+                              batch_size=args.batch_size,
+                              num_frames=max_frames,
+                              split='train',
+                              hml_mode='test')
+    data.shuffle = False
     total_num_samples = args.num_samples * args.num_repetitions
 
     print("Creating model and diffusion...")
@@ -87,8 +112,13 @@ def main():
         _, model_kwargs = next(iterator)
     else:
         collate_args = [{'inp': torch.zeros(n_frames), 'tokens': None, 'lengths': n_frames}] * args.num_samples
-        # t2m
-        collate_args = [dict(arg, text=txt) for arg, txt in zip(collate_args, texts)]
+        is_t2m = any([args.text_prompt])
+        if is_t2m:
+            collate_args = [dict(arg, text=txt) for arg, txt in zip(collate_args, texts)]
+        else:
+            action = data.dataset.action_name_to_action(action_text)
+            collate_args = [dict(arg, action=one_action, action_text=one_action_text) for
+                            arg, one_action, one_action_text in zip(collate_args, action, action_text)]
         if hints is not None:
             collate_args = [dict(arg, hint=hint) for arg, hint in zip(collate_args, hints)]
 
@@ -101,6 +131,9 @@ def main():
     all_motions = []
     all_lengths = []
     all_text = []
+    all_rotations = []
+    all_keyframes = []
+    all_rotations_6d = []
     all_hint = []
     all_hint_for_vis = []
 
@@ -115,7 +148,7 @@ def main():
 
         sample = sample_fn(
             model,
-            (args.batch_size, model.njoints, model.nfeats, n_frames),
+            (args.batch_size, model.njoints, model.nfeats, n_frames if not is_using_data else max_frames),
             clip_denoised=False,
             model_kwargs=model_kwargs,
             skip_timesteps=0,  # 0 is the default value - i.e. don't skip any step
@@ -136,9 +169,25 @@ def main():
 
         rot2xyz_pose_rep = 'xyz' if model.data_rep in ['xyz', 'hml_vec'] else model.data_rep
         rot2xyz_mask = None if rot2xyz_pose_rep == 'xyz' else model_kwargs['y']['mask'].reshape(args.batch_size, n_frames).bool()
-        sample = model.rot2xyz(x=sample, mask=rot2xyz_mask, pose_rep=rot2xyz_pose_rep, glob=True, translation=True,
-                               jointstype='smpl', vertstrans=True, betas=None, beta=0, glob_rot=None,
-                               get_rotations_back=False)
+        sample, rotations, global_orient = model.rot2xyz(x=sample, mask=rot2xyz_mask, pose_rep=rot2xyz_pose_rep,
+                                                         glob=True, translation=True,
+                                                         jointstype='smpl', vertstrans=True, betas=None, beta=0,
+                                                         glob_rot=None,
+                                                         get_rotations_back=True)
+        nsamples, time, n_joints, feats = rotations.shape
+        all_rotations_6d.append(rotations.cpu().numpy())
+        rotations = geometry.rotation_6d_to_matrix(rotations).cpu().numpy()
+        rotations = sRot.from_matrix(rotations.reshape(-1, 3, 3)).as_euler('xyz', degrees=True).reshape(nsamples, time,
+                                                                                                        n_joints, 3)
+
+        for i in range(nsamples):
+            keyframes, _ = heuristic.keyframe_jerk(sample[i].permute(2, 0, 1), 30, 30, smooth_window=3, nms=True,
+                                                   nms_threshold=0.85)
+            keyframes = keyframes.tolist()
+            keyframes = [i for i in keyframes if time - 1 > i > 9]
+            keyframes += [9, time - 1]
+            keyframes.sort()
+            all_keyframes.append(keyframes)
 
         if args.unconstrained:
             all_text += ['unconstrained'] * args.num_samples
@@ -153,6 +202,8 @@ def main():
                     spatial_norm_path = './dataset/humanml_spatial_norm'
                 elif args.dataset == 'kit':
                     spatial_norm_path = './dataset/kit_spatial_norm'
+                elif args.dataset == 'lafan1':
+                    spatial_norm_path = './dataset/lafan1_spatial_norm'
                 else:
                     raise NotImplementedError('unknown dataset')
                 raw_mean = torch.from_numpy(np.load(pjoin(spatial_norm_path, 'Mean_raw.npy'))).cuda()
@@ -168,10 +219,14 @@ def main():
 
         all_motions.append(sample.cpu().numpy())
         all_lengths.append(model_kwargs['y']['lengths'].cpu().numpy())
+        all_rotations.append(rotations)
 
         print(f"created {len(all_motions) * args.batch_size} samples")
 
-
+    all_rotations = np.concatenate(all_rotations, axis=0)
+    all_rotations = all_rotations[:total_num_samples]
+    all_rotations_6d = np.concatenate(all_rotations_6d, axis=0)
+    all_rotations_6d = all_rotations_6d[:total_num_samples]
     all_motions = np.concatenate(all_motions, axis=0)
     all_motions = all_motions[:total_num_samples]  # [bs, njoints, 6, seqlen]
     all_text = all_text[:total_num_samples]
@@ -200,7 +255,12 @@ def main():
         fw.write('\n'.join([str(l) for l in all_lengths]))
 
     print(f"saving visualizations to [{out_path}]...")
-    skeleton = paramUtil.kit_kinematic_chain if args.dataset == 'kit' else paramUtil.t2m_kinematic_chain
+    if args.dataset == 'kit':
+        skeleton = paramUtil.kit_kinematic_chain
+    elif args.dataset == 'lafan1':
+        skeleton = paramUtil.lafan1_kinematic_chain
+    else:
+        skeleton = paramUtil.t2m_kinematic_chain
 
     sample_files = []
     num_samples_in_out_file = 7
@@ -211,23 +271,35 @@ def main():
     for sample_i in range(args.num_samples):
         rep_files = []
         for rep_i in range(args.num_repetitions):
+            keyframes = all_keyframes[rep_i * args.batch_size + sample_i]
             caption = all_text[rep_i*args.batch_size + sample_i]
             length = all_lengths[rep_i*args.batch_size + sample_i]
             motion = all_motions[rep_i*args.batch_size + sample_i].transpose(2, 0, 1)[:length]
+            rotations = all_rotations[rep_i * args.batch_size + sample_i][:length]
+            rotations_6d = all_rotations_6d[rep_i * args.batch_size + sample_i][:length]
             if 'hint' in model_kwargs['y']:
                 hint = all_hint_for_vis[rep_i*args.batch_size + sample_i]
             else:
                 hint = None
-            save_file = sample_file_template.format(sample_i, rep_i)
+            save_file = f'{caption}_rep{rep_i}'
             print(sample_print_template.format(caption, sample_i, rep_i, save_file))
             animation_save_path = os.path.join(out_path, save_file)
-            plot_3d_motion(animation_save_path, skeleton, motion, dataset=args.dataset, title=caption, fps=fps, hint=hint)
+            # plot_3d_motion(animation_save_path, skeleton, motion, dataset=args.dataset, title=caption, fps=fps, hint=hint)
             # Credit for visualization: https://github.com/EricGuo5513/text-to-motion
             rep_files.append(animation_save_path)
 
-        sample_files = save_multiple_samples(args, out_path,
-                                               row_print_template, all_print_template, row_file_template, all_file_template,
-                                               caption, num_samples_in_out_file, rep_files, sample_files, sample_i)
+            if args.dataset == 'lafan1':
+                bvh = Bvh()
+                l_positions = np.stack([lafan1_skeleton_offset] * length, axis=0)
+                l_positions[:, 0] = motion[:, 0] * 100
+                bvh.load_from_data(l_positions, rotations, lafan1_parent_tree, fps=30)
+                bvh.save(animation_save_path + '.bvh')
+                np.savez(animation_save_path + '.npz',
+                         l_positions=l_positions, rotations=rotations_6d, keyframes=np.array(keyframes))
+
+        # sample_files = save_multiple_samples(args, out_path,
+        #                                        row_print_template, all_print_template, row_file_template, all_file_template,
+        #                                        caption, num_samples_in_out_file, rep_files, sample_files, sample_i)
 
     abs_path = os.path.abspath(out_path)
     print(f'[Done] Results are at [{abs_path}]')

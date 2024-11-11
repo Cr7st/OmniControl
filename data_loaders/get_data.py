@@ -31,12 +31,13 @@ def get_dataset(name, num_frames, split='train', hml_mode='train', control_joint
     if name in ["humanml", "kit"]:
         dataset = DATA(split=split, num_frames=num_frames, mode=hml_mode, control_joint=control_joint, density=density)
     else:
-        dataset = DATA(split=split, num_frames=num_frames, control_joint=control_joint, density=density) if datapath == '' \
-            else DATA(split=split, num_frames=num_frames, control_joint=control_joint, density=density, datapath=datapath)
+        dataset = DATA(mode=hml_mode, split=split, num_frames=num_frames, control_joint=control_joint, density=density) if datapath == '' \
+            else DATA(mode=hml_mode, split=split, num_frames=num_frames, control_joint=control_joint, density=density, datapath=datapath)
     return dataset
 
 
-def get_dataset_loader(name, batch_size, num_frames, split='train', hml_mode='train', control_joint=0, density=100, datapath=''):
+def get_dataset_loader(name, batch_size, num_frames, split='train', hml_mode='train', control_joint=0, density=100,
+                       datapath=''):
     dataset = get_dataset(name, num_frames, split, hml_mode, control_joint, density, datapath)
     collate = get_collate_fn(name, hml_mode)
 

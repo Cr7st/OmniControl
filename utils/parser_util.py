@@ -163,8 +163,11 @@ def add_generate_options(parser):
                             "Maximum is 9.8 for HumanML3D (text-to-motion), and 2.0 for HumanAct12 (action-to-motion)")
     group.add_argument("--cond_mode", default='both_text_spatial', type=str,
                        help="generation mode: both_text_spatial, only_text, only_spatial. Other words will be used as text prompt.")
-    group.add_argument("--text_prompt", default='predefined', type=str,
+    group.add_argument("--text_prompt", default='', type=str,
                        help="A text prompt to be generated. If empty, will take text prompts from dataset.")
+    group.add_argument("--action_name", default='', type=str,
+                       help="An action name to be generated. If empty, will take action prompts from dataset.")
+    group.add_argument("--inpaint_motions", default='', type=str,)
 
 
 def add_edit_options(parser):
