@@ -62,9 +62,9 @@ class Dataset(torch.utils.data.Dataset):
             return self._label_to_action[label]
 
     def get_pose_data(self, data_index, frame_ix):
-        pose, hint = self._load(data_index, frame_ix)
+        pose, hint, offset = self._load(data_index, frame_ix)
         label = self.get_label(data_index)
-        return pose, hint, label
+        return pose, hint, label, offset
 
     def get_label(self, ind):
         action = self.get_action(ind)
@@ -164,6 +164,7 @@ class Dataset(torch.utils.data.Dataset):
             if getattr(self, "_load_joints3D", None) is not None:
                 # Locate the root joint of initial pose at origin
                 joints3D = self._load_joints3D(ind, frame_ix)
+                offset = joints3D[0, 0, ::2].copy()
                 joints3D[..., ::2] = joints3D[..., ::2] - joints3D[0, 0, ::2]
                 ret = to_torch(joints3D)
                 if self.translation:
@@ -217,7 +218,7 @@ class Dataset(torch.utils.data.Dataset):
             padded_tr[:, :3] = ret_tr
             ret = torch.cat((ret, padded_tr[:, None]), 1)
         ret = ret.permute(1, 2, 0).contiguous()
-        return ret.float(), hint.float() if type(hint) == torch.Tensor else hint.astype(float)
+        return ret.float(), hint.float() if type(hint) == torch.Tensor else hint.astype(float), offset
 
     def _get_item_data_index(self, data_index):
         nframes = self._num_frames_in_video[data_index]
@@ -266,8 +267,6 @@ class Dataset(torch.utils.data.Dataset):
                 lastone = step * (num_frames - 1)
                 shift_max = nframes - lastone - 1
                 shift = random.randint(0, max(0, shift_max - 1))
-                if not shift == 0:
-                    print('random selecting')
                 frame_ix = shift + np.arange(0, lastone + 1, step)
 
             elif self.sampling == "random":
@@ -279,10 +278,10 @@ class Dataset(torch.utils.data.Dataset):
             else:
                 raise ValueError("Sampling not recognized.")
 
-        inp, hint, action = self.get_pose_data(data_index, frame_ix)
+        inp, hint, action, offset = self.get_pose_data(data_index, frame_ix)
 
 
-        output = {'inp': inp, 'action': action, 'hint': hint}
+        output = {'inp': inp, 'action': action, 'hint': hint, 'offset': offset}
 
         if hasattr(self, '_actions') and hasattr(self, '_action_classes'):
             output['action_text'] = self.action_to_action_name(self.get_action(data_index))

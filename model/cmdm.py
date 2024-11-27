@@ -112,6 +112,8 @@ class CMDM(torch.nn.Module):
         if self.cond_mode != 'no_cond':
             if 'text' in self.cond_mode:
                 self.c_embed_text = nn.Linear(self.clip_dim, self.latent_dim)
+            elif 'action' in self.cond_mode:
+                self.c_embed_action = EmbedAction(self.num_actions, self.latent_dim)
 
     def parameters_wo_clip(self):
         return [p for name, p in self.named_parameters() if not name.startswith('clip_model.')]
@@ -173,6 +175,9 @@ class CMDM(torch.nn.Module):
         if 'text' in self.cond_mode:
             enc_text = self.encode_text(y['text'])
             emb += self.c_embed_text(self.mask_cond(enc_text, force_mask=force_mask))
+        if 'action' in self.cond_mode:
+            action_emb = self.embed_action(y['action'])
+            emb += self.mask_cond(action_emb, force_mask=force_mask)
 
         x = self.c_input_process(x)
 
