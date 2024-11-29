@@ -61,6 +61,12 @@ class Lafan1(Dataset):
         self._num_frames_in_video = []
         self._joints = []
         self._actions = []
+        if split == 'test':
+            data_paths = [path for path in data_paths if 'subject5' in path.__str__()]
+        elif split == 'train':
+            data_paths = [path for path in data_paths if 'subject5' not in path.__str__()]
+        elif split == 'all':
+            data_paths = data_paths
 
         # load from bvh first
         total_frame = 0
@@ -82,9 +88,15 @@ class Lafan1(Dataset):
                 rotations_ruler = np.stack([j.rotation[i:i + self.num_frames] for j in sk.joints], axis=1)
                 self._pose.append(sRot.from_euler('xyz', rotations_ruler.reshape(-1, 3), degrees=True
                                                     ).as_rotvec().reshape(-1, 22*3))
-        print(f'total frame nums: {total_frame}')
+        print(f'total frame num of bvh: {total_frame}')
         # then load from npz
         data_paths = list(Path(self.datapath).rglob('*.npz'))
+        if split == 'test':
+            data_paths = [path for path in data_paths if 'subject5' in path.__str__()]
+        elif split == 'train':
+            data_paths = [path for path in data_paths if 'subject5' not in path.__str__()]
+        elif split == 'all':
+            data_paths = data_paths
         for path in data_paths:
             label = path.stem.split('_')[0][:-1]
             if 'push' in label or 'multipleActions' in label:

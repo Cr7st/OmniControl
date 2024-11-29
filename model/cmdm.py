@@ -176,7 +176,7 @@ class CMDM(torch.nn.Module):
             enc_text = self.encode_text(y['text'])
             emb += self.c_embed_text(self.mask_cond(enc_text, force_mask=force_mask))
         if 'action' in self.cond_mode:
-            action_emb = self.embed_action(y['action'])
+            action_emb = self.c_embed_action(y['action'])
             emb += self.mask_cond(action_emb, force_mask=force_mask)
 
         x = self.c_input_process(x)
