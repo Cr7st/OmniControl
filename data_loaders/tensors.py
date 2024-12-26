@@ -68,9 +68,9 @@ def collate(batch):
         hint = numpy.array([b['hint']for b in notnone_batches])
         cond['y'].update({'hint': torch.as_tensor(hint)})
 
-    if 'offset' in notnone_batches[0]:
-        offset = torch.tensor([b['offset'] for b in notnone_batches])
-        cond['y'].update({'offset': offset})
+    # if 'offset' in notnone_batches[0]:
+    #     offset = torch.tensor([b['offset'] for b in notnone_batches])
+    #     cond['y'].update({'offset': offset})
     
     return motion, cond
 

@@ -181,7 +181,7 @@ def main():
                                                                                                         n_joints, 3)
 
         for i in range(nsamples):
-            keyframes, _ = heuristic.keyframe_jerk(sample[i].permute(2, 0, 1), 30, 30, smooth_window=3, nms=True,
+            keyframes, _ = heuristic.keyframe_jerk(sample[i].permute(2, 0, 1), 30, 30, smooth_window=3, random_infill=True,
                                                    nms_threshold=0.85)
             keyframes = keyframes.tolist()
             keyframes = [i for i in keyframes if time - 1 > i > 9]
@@ -216,7 +216,7 @@ def main():
                 all_hint.append(hint.data.cpu().numpy())
                 hint = hint.view(hint.shape[0], hint.shape[1], n_joints, 3)
                 all_hint_for_vis.append(hint.data.cpu().numpy())
-
+        sample[:, 0, ::2] += model_kwargs['y']['offset'].unsqueeze(-1).cuda()
         all_motions.append(sample.cpu().numpy())
         all_lengths.append(model_kwargs['y']['lengths'].cpu().numpy())
         all_rotations.append(rotations)
@@ -281,7 +281,7 @@ def main():
                 hint = all_hint_for_vis[rep_i*args.batch_size + sample_i]
             else:
                 hint = None
-            save_file = f'{caption}_rep{rep_i}'
+            save_file = f'{caption}_sample_{sample_i}'
             print(sample_print_template.format(caption, sample_i, rep_i, save_file))
             animation_save_path = os.path.join(out_path, save_file)
             # plot_3d_motion(animation_save_path, skeleton, motion, dataset=args.dataset, title=caption, fps=fps, hint=hint)

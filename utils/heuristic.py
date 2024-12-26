@@ -16,7 +16,7 @@ def approximate_jerk(frames, fps):
 
 def non_max_suppression_jerks(jerks, kf_rate, threshold=0.85):
     """
-    jerks: torch.tensor, the jerk magnit ude of each frame
+    jerks: torch.tensor, the jerk magnitude of each frame
     kf_rate: int, the average number of frames between two keyframes
     threshold: float, the threshold for non-maximum suppression
 
@@ -54,27 +54,56 @@ def non_max_suppression_jerks(jerks, kf_rate, threshold=0.85):
     return max_jerks_index
 
 
-def keyframe_jerk(joint_positions, fps, keyframe_rate, smooth_window=3, nms=False, nms_threshold=0.85):
+def keyframe_jerk(joint_positions, fps, keyframe_rate, smooth_window=3, nms_threshold=0.85, min_block_size=60,
+                  min_gap=5, random_infill=True):
     if type(joint_positions) != torch.Tensor:
         joint_positions = torch.tensor(joint_positions)
     jerk_magnitude = approximate_jerk(joint_positions[:, 0, :], fps)
     jerk_magnitude = smooth(jerk_magnitude, smooth_window)
 
-    if not nms:
-        # select the highest jerk magnitude in each fps
-        # seperate each block of keyframes
-        blocks_length = len(joint_positions) // keyframe_rate
-        keyframe_index_array = []
-        for i in range(blocks_length):
-            if i == blocks_length - 1:
-                jerk_magnitude_block = jerk_magnitude[i * keyframe_rate:]
-            else:
-                jerk_magnitude_block = jerk_magnitude[i * keyframe_rate:(i + 1) * keyframe_rate]
-            keyframe_index = torch.argmax(jerk_magnitude_block) + i * keyframe_rate
-            keyframe_index_array.append(keyframe_index)
-        keyframe_index_array = torch.tensor(keyframe_index_array)
+    keyframe_index_array = non_max_suppression_jerks(jerk_magnitude, keyframe_rate, threshold=nms_threshold)
+
+    # fill large gaps
+    # find whether the gap between two keyframes is larger than min_block_size
+    keyframe_index_array = keyframe_index_array.sort()[0]
+    gaps = keyframe_index_array[1:] - keyframe_index_array[:-1]
+    if random_infill:
+        # random fill the gap with the frames
+        # for i in range(len(gaps)):
+        i = 0
+        while i < len(gaps):
+            if gaps[i] >= min_block_size:
+                # breakpoint()
+                start = keyframe_index_array[i]
+                end = keyframe_index_array[i + 1]
+                # +5, -5, avoid selected frame to be too close to the start and end
+                randinfill = torch.randint(start + 10, end - 10, (torch.floor(gaps[i] / min_block_size).int(),))
+
+                keyframe_index_array = torch.cat(
+                    (keyframe_index_array[:i + 1], randinfill.cuda(), keyframe_index_array[i + 1:]))
+                keyframe_index_array = keyframe_index_array.sort()[0]
+                gaps = keyframe_index_array[1:] - keyframe_index_array[:-1]
+            i += 1
     else:
-        keyframe_index_array = non_max_suppression_jerks(jerk_magnitude, keyframe_rate, threshold=nms_threshold)
+        i = 0
+        while i < len(gaps):
+            if gaps[i] >= min_block_size:
+                start = keyframe_index_array[i]
+                end = keyframe_index_array[i + 1]
+                jerk_magnitude_block = jerk_magnitude[start + min_gap:end - min_gap]
+
+                if jerk_magnitude_block.numel() > 0:
+                    max_index = torch.argmax(jerk_magnitude_block)
+                    keyframe_index_array = torch.cat((keyframe_index_array[:i + 1],
+                                                      torch.tensor([start + max_index + min_gap]),
+                                                      keyframe_index_array[i + 1:]))
+                    keyframe_index_array, _ = keyframe_index_array.sort()
+            i += 1
+            gaps = keyframe_index_array[1:] - keyframe_index_array[:-1]
+            if (gaps <= min_block_size).all():
+                break
+            if i == len(gaps):
+                i = 0
 
     # +3 make up for the 3 frames that were removed in the jerk calculation
     return keyframe_index_array + 3, jerk_magnitude
