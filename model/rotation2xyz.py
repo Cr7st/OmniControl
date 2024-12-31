@@ -5,7 +5,7 @@ from utils.skeleton_torch import SkeletonMotionTorch
 
 
 from model.smpl import SMPL, JOINTSTYPE_ROOT
-from data_loaders.a2m.lafan1 import lafan1_parent_tree, lafan1_skeleton_offset
+from data_loaders.a2m.lafan1 import lafan1_parent_tree
 # from .get_model import JOINTSTYPES
 JOINTSTYPES = ["a2m", "a2mpl", "smpl", "vibe", "vertices"]
 
@@ -16,7 +16,7 @@ class Rotation2xyz:
         self.dataset = dataset
         if self.dataset == 'lafan1':
             import numpy as np
-            self.l_position = np.stack([lafan1_skeleton_offset] * 210, axis=0) / 100 # cm to m
+            self.l_position = np.load('../KeyframeGenerator/exps/l_position.npy').astype(np.float32) # cm to m
             self.skeleton = SkeletonMotionTorch()
             self.skeleton.from_parent_array(lafan1_parent_tree, torch.tensor(self.l_position, device=device))
 
@@ -47,7 +47,7 @@ class Rotation2xyz:
         nsamples, time, njoints, feats = x_rotations.shape
 
         if self.dataset == 'lafan1':
-            self.skeleton.apply_pose(x_translations.permute(0, 2, 1), x_rotations)
+            self.skeleton.apply_pose(x_translations.permute(0, 2, 1) * 100, x_rotations)
             x_xyz = self.skeleton.joints_global_positions
             x_xyz[~mask] = 0
             x_xyz = x_xyz.permute(0, 2, 3, 1).contiguous()

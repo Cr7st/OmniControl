@@ -83,7 +83,7 @@ class CMDM(torch.nn.Module):
                 self.clip_version = clip_version
                 self.clip_model = self.load_and_freeze_clip(clip_version)
             elif 'action' in self.cond_mode:
-                self.embed_action = nn.Linear(self.num_actions, self.latent_dim)
+                self.embed_action = EmbedAction(self.num_actions, self.latent_dim)
 
         self.output_process = OutputProcess(self.data_rep, self.input_feats, self.latent_dim, self.njoints,
                                             self.nfeats)
@@ -210,7 +210,7 @@ class CMDM(torch.nn.Module):
             enc_text = self.encode_text(y['text'])
             emb += self.embed_text(self.mask_cond(enc_text, force_mask=force_mask))
         elif 'action' in self.cond_mode:
-            action_emb = self.action_emb(y['action'])
+            action_emb = self.embed_action(y['action'])
             emb += self.mask_cond(action_emb, force_mask=force_mask)
 
         x = self.input_process(x)

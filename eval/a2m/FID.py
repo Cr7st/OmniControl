@@ -1,3 +1,4 @@
+import numpy
 from lightning import LightningModule
 # from lightning_modules.optimizer import make_optimizer, make_scheduler
 # from .loss import get_loss_funcs
@@ -11,7 +12,7 @@ from abc import ABC
 
 def make_model(cfg):
     return TransformerEncoder(66, 256, 1024, 4, 4, 9,
-                              pooling_func='mean')
+                              pooling_func='max')
 
 class Evaluator(ABC):
     def __init__(self):
@@ -99,8 +100,6 @@ class FIDModule(LightningModule, Evaluator):
         bs = states.shape[0]
         # actions -= 1
         actions = actions.squeeze(-1).to(torch.long)
-        padding_mask = self._make_mask(bs, lengths, states.shape[1])
-        padding_mask = (1. - padding_mask).to(bool)
         states = self.zscore_normalize(states)
         # if self.hparams.model_cfg.module == 'model.extractor_model.TransformerEncoder':
         padding_mask = self._make_mask(bs, lengths, states.shape[1]).to(self.device)
@@ -137,6 +136,17 @@ class FIDModule(LightningModule, Evaluator):
             acc_mean = acc_mean * (idx / (idx + 1)) + acc * (1 / (idx + 1))
         self.features = torch.cat(self.features, dim=0)
         features = self.features.cpu().numpy()
+        features_clean = features[~np.isnan(features).any(axis=1)]
+        print(features_clean.shape)
+        diversity_times = 20
+        diversity = 0
+        num_motions = features_clean.shape[0]
+        first_indices = np.random.randint(0, num_motions, diversity_times)
+        second_indices = np.random.randint(0, num_motions, diversity_times)
+        for first_idx, second_idx in zip(first_indices, second_indices):
+            diversity += torch.dist(torch.tensor(features_clean[first_idx, :]),
+                                    torch.tensor(features_clean[second_idx, :]))
+        diversity /= diversity_times
         mu = np.mean(features, axis=0)
         sigma = np.cov(features, rowvar=False)
 
@@ -144,7 +154,8 @@ class FIDModule(LightningModule, Evaluator):
 
         return {
             'FID': fid,
-            'acc': acc_mean
+            'acc': acc_mean,
+            'Diversity': diversity
         }
 
     @staticmethod

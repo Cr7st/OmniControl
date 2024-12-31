@@ -19,6 +19,7 @@ import utils.rotation_conversions as geometry
 import lightning as L
 import subprocess
 import os
+import numpy
 from tqdm import tqdm
 from utils import heuristic
 
@@ -58,7 +59,7 @@ class EvaluateWrapper(Dataset):
         self.max_frames = len(keyframes) if len(keyframes) > self.max_frames else self.max_frames
         self.rotations.append(rotations)
         self.g_positions.append(g_positions)
-        self.keyframes.append(np.array(keyframes))
+        self.keyframes.append(numpy.array(keyframes))
         self.actions.append(action)
         self.traj.append(traj)
 
@@ -68,10 +69,10 @@ class EvaluateWrapper(Dataset):
 
         full_rotations_list = np.zeros((len(self), 219, 22, 6), dtype=np.float32)
         full_positions_list = np.zeros((len(self), 219, 22, 3), dtype=np.float32)
-        assert np.isnan(full_positions_list).sum() == 0
-        assert np.isnan(self.l_position).sum() == 0
+        assert numpy.isnan(full_positions_list).sum() == 0
+        assert numpy.isnan(self.l_position).sum() == 0
         full_positions_list[:, :] = self.l_position
-        assert np.isnan(full_positions_list).sum() == 0
+        assert numpy.isnan(full_positions_list).sum() == 0
 
         keyframes_list = [ np.concatenate([ks, np.zeros((self.max_frames - ks.shape[0]), dtype=np.int32)], axis=-1, dtype=np.int32)[None] for ks in self.keyframes]
         keyframes_list = np.concatenate(keyframes_list, axis=0)
@@ -80,7 +81,7 @@ class EvaluateWrapper(Dataset):
         for i, ks in enumerate(self.keyframes):
             full_rotations_list[i, ks] = self.rotations[i]
             full_positions_list[i, ks, 0] = self.g_positions[i][:, 0]
-            assert np.isnan(self.g_positions[i]).sum() == 0
+            assert numpy.isnan(self.g_positions[i]).sum() == 0
             full_rotations_list[i, :ks[0]] = self.rotations[i][0]
             full_positions_list[i, :ks[0], 0] = self.g_positions[i][0, 0]
 
@@ -148,8 +149,9 @@ class EvaluateWrapper(Dataset):
         trans_offset = g_positions[0, 0, ::2]
         g_positions[..., ::2] -= trans_offset
 
-        g_positions, rotations = data_utils.rotate_start_to_v2(g_positions, rotations, frame=0)
-
+        g_positions, rotations, rot_offset = data_utils.rotate_start_to_v2(g_positions, rotations, frame=9, return_offset=True)
+        traj = self.traj[idx].copy()
+        traj = np.matmul(rot_offset, traj[..., None])[..., 0]
         # if self.data_repr == 'gpos':
         states = np.concatenate([g_positions.reshape(interval, -1)])
         # elif self.data_repr == 'rot6d_pos':
@@ -165,7 +167,7 @@ class EvaluateWrapper(Dataset):
                 g_positions = np.concatenate([g_positions] + padding, axis=0)
             return g_positions.astype(np.float32), interval
         elif self.metric_name == 'traj':
-            return self.traj[idx].astype(np.float32), g_positions[:, 0].astype(np.float32)
+            return traj.astype(np.float32), g_positions[:, 0].astype(np.float32)
 
 
     def __len__(self):
@@ -195,7 +197,7 @@ def sample2eval(sample, model_kwargs, full=False):
                                                      glob_rot=None,
                                                      get_rotations_back=True)
     nsamples, time, njoints, feats = rotations.shape
-    root_trans = sample[:, 0, ...].permute(0, 2, 1) * 100
+    root_trans = sample[:, 0, ...].permute(0, 2, 1)
     rotations_list = []
     root_trans_list = []
     g_positions_list = []
@@ -210,17 +212,17 @@ def sample2eval(sample, model_kwargs, full=False):
             keyframes += [9, time - 1]
             keyframes.sort()
         else:
-            keyframes = list(range(9, time-1))
+            keyframes = list(range(time))
         rotations_list.append(rotations[i, keyframes])
         root_trans_list.append(root_trans[i, keyframes])
-        g_positions_list.append(sample[i, :, :, keyframes].permute(2, 0, 1) * 100)
+        g_positions_list.append(sample[i, :, :, keyframes].permute(2, 0, 1))
         keyframes_list.append(keyframes)
         actions.append(model_kwargs['y']['action'][i].squeeze())
     return rotations_list, root_trans_list, g_positions_list, keyframes_list, actions
 
 
 if __name__ == '__main__':
-    max_frames = 210
+    max_frames = 219
     fid_evaluator = FIDModule.load_from_checkpoint('/home/zheng/Code/KeyframeGenerator/exps/MotionFID/full_motion_v2/checkpoint/epoch=54-train_acc=0.759-val_acc=0.760.ckpt')
     penetration_evaluator = PenetrationEvaluator()
     penetration_evaluator = PenetrationEvaluator()
@@ -237,9 +239,9 @@ if __name__ == '__main__':
 
     logger.log("creating data loader...")
     split = 'test'
-    gt_loader = get_dataset_loader(name=args.dataset, batch_size=args.batch_size, num_frames=210, split=split,
+    gt_loader = get_dataset_loader(name=args.dataset, batch_size=args.batch_size, num_frames=219, split=split,
                                    hml_mode='gt', datapath='/home/zheng/Code/KeyframeGenerator/datasets/lafan1_keyframes')
-    gen_loader = get_dataset_loader(name=args.dataset, batch_size=args.batch_size, num_frames=210, split=split,
+    gen_loader = get_dataset_loader(name=args.dataset, batch_size=args.batch_size, num_frames=219, split=split,
                                     hml_mode='eval', datapath='/home/zheng/Code/KeyframeGenerator/datasets/lafan1_keyframes')
     num_actions = gen_loader.dataset.num_actions
 
@@ -266,9 +268,10 @@ if __name__ == '__main__':
     # dataloader = DataLoader(eval_wrapper, batch_size=64, shuffle=False)
     trainer = L.Trainer()
     # trainer.predict(fid_evaluator, dataloader)
-    fid_evaluator.gt_mu = np.load('/home/zheng/Code/KeyframeGenerator/fid_mu.npy')
-    fid_evaluator.gt_sigma = np.load('/home/zheng/Code/KeyframeGenerator/fid_sigma.npy')
-    for i in range(5):
+    fid_evaluator.gt_mu = np.load('/home/zheng/Code/KeyframeGenerator/gt_mu.npy')
+    fid_evaluator.gt_sigma = np.load('/home/zheng/Code/KeyframeGenerator/gt_sigma.npy')
+    all_results = []
+    for i in range(20):
         eval_wrapper = EvaluateWrapper()
 
         for data in gen_loader:
@@ -283,7 +286,7 @@ if __name__ == '__main__':
 
             sample = sample_fn(
                 model,
-                (args.batch_size, model.njoints, model.nfeats, max_frames),
+                (args.batch_size, model.njoints, model.nfeats, 219),
                 clip_denoised=False,
                 model_kwargs=model_kwargs,
                 skip_timesteps=0,  # 0 is the default value - i.e. don't skip any step
@@ -295,22 +298,39 @@ if __name__ == '__main__':
             )
             sample = sample[:, :263]
 
+            hint = model_kwargs['y']['hint'].reshape(args.batch_size, -1, 22, 3)
             rotations, root_trans_list, g_positions, keyframes_list, actions = sample2eval(sample, model_kwargs, full=True)
             for i in range(len(rotations)):
                 eval_wrapper.append_data(rotations[i].cpu().numpy(), root_trans_list[i].cpu().numpy(),
-                                         g_positions[i].cpu().numpy(), keyframes_list[i], actions[i].cpu().numpy(),
-                                         model_kwargs['hint'][:, -1].permute(2, 0, 1))
+                                         g_positions[i].cpu().numpy(), keyframes_list[i],
+                                         actions[i].cpu().numpy()[None],
+                                         hint[i, :, 0].cpu().numpy() * 100)
 
+        eval_wrapper.on_append_data_end()
         dataloader = DataLoader(eval_wrapper, batch_size=64, shuffle=False)
         result = fid_evaluator.evaluate(dataloader)
-        print(f'fid: {result["FID"]}, acc： {result["acc"]}')
+        res_dict = {}
+        print(f'fid: {result["FID"]}, acc： {result["acc"]}, diversity: {result["Diversity"]}')
+        res_dict['FID'] = result['FID'].item()
+        res_dict['acc'] = result['acc']
+        res_dict['diversity'] = result['Diversity'].item()
         result = penetration_evaluator.evaluate(dataloader)
         print(f'penetration: {result["penetration"]}')
+        res_dict['penetration'] = result['penetration'].item()
         result = foot_skate_evaluator.evaluate(dataloader)
-        print(f'foot skate: {result["skating ratio"]}')
+        print(f'foot skate: {result["m"]}')
+        res_dict['foot skate'] = result['m'].item()
         result = traj_err_evaluator.evaluate(dataloader)
         print(f'traj error 0.2: {result["traj fail 0.2"]}')
-        result = traj_err_evaluator.evaluate(dataloader)
         print(f'traj error 0.5: {result["traj fail 0.5"]}')
+        print(f'traj error: {result["traj error"]}')
+        res_dict['traj fail 0.2'] = result['traj fail 0.2'].item()
+        res_dict['traj fail 0.5'] = result['traj fail 0.5'].item()
+        res_dict['traj error'] = result['traj error'].item()
+        all_results.append(res_dict)
+    import json
+
+    with open('results.json', 'w') as f:
+        json.dump(all_results, f)
 
 

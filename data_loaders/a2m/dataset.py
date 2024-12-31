@@ -131,7 +131,10 @@ class Dataset(torch.utils.data.Dataset):
 
     def random_mask_train(self, joints, n_joints=22):
         if n_joints == 22:
-            controllable_joints = np.array([0]) if self.dataname == 'lafan1' else np.array([0, 10, 11, 15, 20, 21])
+            if self.dataname == 'lafan1':
+                controllable_joints = np.array([0, 4, 8, 13, 17, 21])
+            else:
+                controllable_joints = np.array([0, 10, 11, 15, 20, 21])
         else:
             {1:'root', 2:'BP', 3:'BT', 4:'BLN', 5:'BUN', 6:'LS', 7:'LE', 8:'LW', 9:'RS', 10:'RE', 11:'RW', 12:'LH', 13:'LK', 14:'LA', 15:'LMrot', 16:'LF', 17:'RH', 18:'RK', 19:'RA', 20:'RMrot', 21:'RF'}
             choose_one = ['root', 'BUN', 'LW', 'RW', 'LF', 'RF']

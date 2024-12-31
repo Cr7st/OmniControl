@@ -1,4 +1,7 @@
+import os.path
 import pickle as pkl
+
+import numpy
 import numpy as np
 import torch
 
@@ -50,74 +53,95 @@ lafan1_skeleton_offset = np.array([
 class Lafan1(Dataset):
     dataname = "lafan1"
 
-    def __init__(self, datapath="/home/zheng/Code/KeyframeExtractor/datasets/lafan1", split='train',
-                 control_joint=0, density=100, **kwargs):
+    def __init__(self, datapath="/home/zheng/Code/KeyframeExtractor/datasets/lafan1", split='train', **kwargs):
         self.datapath = datapath
 
-        super().__init__(control_joint=control_joint, density=density, **kwargs)
+        super().__init__(**kwargs)
 
-        data_paths = list(Path(self.datapath).rglob('*.bvh'))
         self._pose = []
         self._num_frames_in_video = []
         self._joints = []
         self._actions = []
-        if split == 'test':
-            data_paths = [path for path in data_paths if 'subject5' in path.__str__()]
-        elif split == 'train':
-            data_paths = [path for path in data_paths if 'subject5' not in path.__str__()]
-        elif split == 'all':
-            data_paths = data_paths
 
-        # load from bvh first
-        total_frame = 0
-        sk = skeleton.SkeletonMotion()
-        for path in data_paths:
-            label = path.stem.split('_')[0][:-1]
-            if 'push' in label or 'multipleActions' in label:
-                continue
-            elif 'fight' in label:
-                label = 'fight'
-            elif 'sprint' in label:
-                label = 'run'
-            sk.from_bvh(path)
-            total_frame += sk.joints_global_positions.shape[0]
-            for i in range(0, sk.joints_global_positions.shape[0] - self.num_frames + 1, self.num_frames):
+        if os.path.isfile(datapath):
+            self.have_keyframes = True
+            self._keyframes = []
+            data = np.load(datapath)
+            keyframes = data['keyframes']
+            action = data['action']
+            g_positions = data['g_positions']
+            rotations = data['rotations']
+            total_len = action.shape[0]
+            for i in range(total_len):
+                self._actions.append(lafan1_action_dict_9[int(action[i][0]) - 1])
+                self._keyframes.append(keyframes[i])
+                self._joints.append(g_positions[i] / 100)  # cm to m
+                self._num_frames_in_video.append(g_positions[i].shape[0])
+                rotations_6d = torch.from_numpy(rotations[i])
+                rotations_mat = rotation_conversions.rotation_6d_to_matrix(rotations_6d)
+                full_rotation = rotation_conversions.matrix_to_axis_angle(rotations_mat)
+                self._pose.append(full_rotation.reshape(-1, 22 * 3))
+        else:
+            self.have_keyframes = False
+            data_paths = list(Path(self.datapath).rglob('*.bvh'))
+            if split == 'test':
+                data_paths = [path for path in data_paths if 'subject5' in path.__str__()]
+            elif split == 'train':
+                data_paths = [path for path in data_paths if 'subject5' not in path.__str__()]
+            elif split == 'all':
+                data_paths = data_paths
+
+            # load from bvh first
+            sk = skeleton.SkeletonMotion()
+            for path in data_paths:
+                label = path.stem.split('_')[0][:-1]
+                if 'push' in label or 'multipleActions' in label:
+                    continue
+                elif 'fight' in label:
+                    label = 'fight'
+                elif 'sprint' in label:
+                    label = 'run'
                 self._actions.append(label)
-                self._joints.append(sk.joints_global_positions[i:i + self.num_frames] / 100) # cm to m
-                self._num_frames_in_video.append(self.num_frames)
-                rotations_ruler = np.stack([j.rotation[i:i + self.num_frames] for j in sk.joints], axis=1)
+                sk.from_bvh(path)
+                self._joints.append(sk.joints_global_positions / 100) # cm to m
+                self._num_frames_in_video.append(sk.joints_global_positions.shape[0])
+                rotations_ruler = np.stack([j.rotation for j in sk.joints], axis=1)
                 self._pose.append(sRot.from_euler('xyz', rotations_ruler.reshape(-1, 3), degrees=True
                                                     ).as_rotvec().reshape(-1, 22*3))
-        print(f'total frame num of bvh: {total_frame}')
-        # then load from npz
-        data_paths = list(Path(self.datapath).rglob('*.npz'))
-        if split == 'test':
-            data_paths = [path for path in data_paths if 'subject5' in path.__str__()]
-        elif split == 'train':
-            data_paths = [path for path in data_paths if 'subject5' not in path.__str__()]
-        elif split == 'all':
-            data_paths = data_paths
-        for path in data_paths:
-            label = path.stem.split('_')[0][:-1]
-            if 'push' in label or 'multipleActions' in label:
-                continue
-            elif 'fight' in label:
-                label = 'fight'
-            elif 'sprint' in label:
-                label = 'run'
-            self._actions.append(label)
-            data = np.load(path)
-            self._joints.append(data['g_positions'] / 100) # cm to m
-            self._num_frames_in_video.append(data['g_positions'].shape[0])
-            rotations_6d = torch.from_numpy(data['rotations'])
-            rotations_mat = rotation_conversions.rotation_6d_to_matrix(rotations_6d)
-            rotations = rotation_conversions.matrix_to_axis_angle(rotations_mat)
-            self._pose.append(rotations.reshape(-1, 22*3))
+
+            # then load from npz
+            data_paths = list(Path(self.datapath).rglob('*.npz'))
+            if split == 'test':
+                data_paths = [path for path in data_paths if 'subject5' in path.__str__()]
+            elif split == 'train':
+                data_paths = [path for path in data_paths if 'subject5' not in path.__str__()]
+            elif split == 'all':
+                data_paths = data_paths
+            for path in data_paths:
+                label = path.stem.split('_')[0][:-1]
+                if 'push' in label or 'multipleActions' in label:
+                    continue
+                elif 'fight' in label:
+                    label = 'fight'
+                elif 'sprint' in label:
+                    label = 'run'
+                data = np.load(path)
+                if data['g_positions'].shape[0] < 219:
+                    continue
+                self._actions.append(label)
+                self._joints.append(data['g_positions'] / 100) # cm to m
+                self._num_frames_in_video.append(data['g_positions'].shape[0])
+                rotations_6d = torch.from_numpy(data['rotations'])
+                rotations_mat = rotation_conversions.rotation_6d_to_matrix(rotations_6d)
+                rotations = rotation_conversions.matrix_to_axis_angle(rotations_mat)
+                self._pose.append(rotations.reshape(-1, 22*3))
 
 
         total_num_actions = 9
         self.num_actions = total_num_actions
 
+        # lafan1 only has 67 files so the IO cost would be high
+        # we duplicate the index for 10 times
         self._train = list(range(len(self._pose)))
 
         keep_actions = np.arange(0, total_num_actions)
@@ -137,3 +161,6 @@ class Lafan1(Dataset):
     def _load_rotvec(self, ind, frame_ix):
         pose = self._pose[ind][frame_ix].reshape(-1, 22, 3)
         return pose
+
+    def get_keyframes(self, ind):
+        return self._keyframes[ind]
